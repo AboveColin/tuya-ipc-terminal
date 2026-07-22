@@ -298,6 +298,18 @@ func (s *RTSPServer) findCamera(path string) (*storage.CameraInfo, *storage.User
 	// Find camera by RTSP path
 	for _, camera := range cameras {
 		if camera.RTSPPath == path {
+			// Check if this is our hardcoded Philips camera
+			if tuya.IsHardcodedDevice(camera.DeviceID) {
+				core.Logger.Info().Msg("🐾 Using hardcoded credentials for Philips Pet Series camera")
+				// Return a dummy user session (not needed for hardcoded camera)
+				dummyUser := &storage.UserSession{
+					Region:   "hardcoded",
+					Email:    "philips@localhost",
+					UserKey:  "philips_hardcoded_user",
+				}
+				return &camera, dummyUser, nil
+			}
+			
 			// Get user for this camera
 			users, err := s.storageManager.ListUsers()
 			if err != nil {
@@ -314,6 +326,7 @@ func (s *RTSPServer) findCamera(path string) (*storage.CameraInfo, *storage.User
 
 	return nil, nil, nil
 }
+
 
 func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolution string, user *storage.UserSession) (*CameraStream, error) {
 	s.mutex.Lock()

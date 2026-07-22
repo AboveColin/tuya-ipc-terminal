@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"tuya-ipc-terminal/pkg/core"
 	"tuya-ipc-terminal/pkg/rtsp"
 	"tuya-ipc-terminal/pkg/storage"
+	"tuya-ipc-terminal/pkg/tuya"
 )
 
 var storageManager *storage.StorageManager
@@ -86,23 +88,69 @@ func runStartServer(cmd *cobra.Command, args []string) error {
 	port, _ := cmd.Flags().GetInt("port")
 	daemon, _ := cmd.Flags().GetBool("daemon")
 
-	// Check if we have any authenticated users
+	// The embedding application supplies the camera metadata. This keeps the
+	// bridge binary account- and device-independent while preserving the legacy
+	// defaults for standalone development.
+	bridgeDeviceID := tuya.BridgeDeviceID()
+	if bridgeDeviceID == "" {
+		return errors.New("PETSERIES_DEVICE_ID is required")
+	}
+	deviceName := envOrDefault("PETSERIES_DEVICE_NAME", "Philips Pet Series")
+	productID := envOrDefault("PETSERIES_PRODUCT_ID", "do4slsxg7nosvwmf")
+	deviceUUID := envOrDefault("PETSERIES_DEVICE_UUID", bridgeDeviceID)
+	rtspPath := envOrDefault("PETSERIES_RTSP_PATH", "/philips-pet")
+	if !strings.HasPrefix(rtspPath, "/") {
+		rtspPath = "/" + rtspPath
+	}
+	deviceSkill := envOrDefault("PETSERIES_DEVICE_SKILL", `{"p2pType":4}`)
+	cameras, _ := storageManager.GetAllCameras()
+
+	hasBridgeCamera := false
+	for _, cam := range cameras {
+		if cam.DeviceID == bridgeDeviceID {
+			hasBridgeCamera = true
+			break
+		}
+	}
+
+	if !hasBridgeCamera {
+		core.Logger.Info().Msgf("Injecting Philips Pet Series bridge camera %s", bridgeDeviceID)
+
+		dummyUserKey := "philips_bridge_user"
+
+		bridgeCamera := storage.CameraInfo{
+			UserKey:    dummyUserKey,
+			DeviceID:   bridgeDeviceID,
+			DeviceName: deviceName,
+			Category:   "sp",
+			RTSPPath:   rtspPath,
+			ProductID:  productID,
+			UUID:       deviceUUID,
+			Skill:      deviceSkill,
+		}
+
+		if err := storageManager.UpdateCamerasForUser(dummyUserKey, []storage.CameraInfo{bridgeCamera}); err != nil {
+			core.Logger.Warn().Msgf("Failed to save bridge camera: %v", err)
+		} else {
+			core.Logger.Info().Msg("Bridge camera injected successfully")
+		}
+
+		// Reload cameras
+		cameras, _ = storageManager.GetAllCameras()
+	}
+
+	// Check if we have any authenticated users (skip for hardcoded camera)
 	users, err := storageManager.ListUsers()
 	if err != nil {
 		return fmt.Errorf("failed to check users: %v", err)
 	}
 
-	if len(users) == 0 {
+	// Only require users if we don't have the hardcoded camera
+	if len(users) == 0 && !hasBridgeCamera && len(cameras) == 0 {
 		core.Logger.Warn().Msg("No authenticated users found.")
 		core.Logger.Warn().Msg("Please add users first:")
 		core.Logger.Warn().Msg("  tuya-ipc-terminal auth add [region] [email]")
 		return errors.New("no authenticated users")
-	}
-
-	// Check if we have any cameras
-	cameras, err := storageManager.GetAllCameras()
-	if err != nil {
-		return fmt.Errorf("failed to check cameras: %v", err)
 	}
 
 	if len(cameras) == 0 {
@@ -141,6 +189,13 @@ func runStartServer(cmd *cobra.Command, args []string) error {
 
 	core.Logger.Info().Msgf("RTSP server stopped.")
 	return nil
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func runStopServer(cmd *cobra.Command, args []string) error {

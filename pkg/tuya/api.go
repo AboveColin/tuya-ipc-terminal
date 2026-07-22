@@ -224,23 +224,27 @@ type WebRTCConfigResponse struct {
 }
 
 type WebRTCConfig struct {
-	AudioAttributes     AudioAttributes `json:"audioAttributes"`
-	Auth                string          `json:"auth"`
-	GatewayId           string          `json:"gatewayId"`
-	Id                  string          `json:"id"`
-	LocalKey            string          `json:"localKey"`
-	MotoId              string          `json:"motoId"`
-	NodeId              string          `json:"nodeId"`
-	P2PConfig           P2PConfig       `json:"p2pConfig"`
-	ProtocolVersion     string          `json:"protocolVersion"`
-	Skill               string          `json:"skill"`
-	Sub                 bool            `json:"sub"`
-	SupportWebrtcRecord bool            `json:"supportWebrtcRecord"`
-	SupportsPtz         bool            `json:"supportsPtz"`
-	SupportsWebrtc      bool            `json:"supportsWebrtc"`
-	VedioClarity        int             `json:"vedioClarity"`
-	VedioClaritys       []int           `json:"vedioClaritys"`
-	VideoClarity        int             `json:"videoClarity"`
+	AudioAttributes AudioAttributes `json:"audioAttributes"`
+	Auth            string          `json:"auth"`
+	GatewayId       string          `json:"gatewayId"`
+	Id              string          `json:"id"`
+	LocalKey        string          `json:"localKey"`
+	// Password is the per-camera media authorization secret returned by
+	// thing.m.ipc.rtc.config.get. It is distinct from the MQTT password.
+	Password            string    `json:"password"`
+	MotoId              string    `json:"motoId"`
+	NodeId              string    `json:"nodeId"`
+	P2PConfig           P2PConfig `json:"p2pConfig"`
+	ProtocolVersion     string    `json:"protocolVersion"`
+	Skill               string    `json:"skill"`
+	Sub                 bool      `json:"sub"`
+	SupportWebrtcRecord bool      `json:"supportWebrtcRecord"`
+	SupportsPtz         bool      `json:"supportsPtz"`
+	SupportsWebrtc      bool      `json:"supportsWebrtc"`
+	VedioClarity        int       `json:"vedioClarity"`
+	VedioClaritys       []int     `json:"vedioClaritys"`
+	VideoClarity        int       `json:"videoClarity"`
+	AesKey              string    `json:"aesKey"` // AES-128 key for KCP/IMM protocol
 }
 
 type AudioSkill struct {
@@ -271,9 +275,25 @@ type AudioAttributes struct {
 }
 
 type P2PConfig struct {
-	Auth   string      `json:"auth"`
-	Ices   []ICEServer `json:"ices"`
-	MotoId string      `json:"motoId"`
+	Auth        string                 `json:"auth"`
+	Ices        []ICEServer            `json:"ices"`
+	MotoId      string                 `json:"motoId"`
+	Session     P2PSession             `json:"session"`
+	TcpToken    map[string]interface{} `json:"tcpRelay"`
+	Log         map[string]interface{} `json:"log"`
+	IsCacheable bool                   `json:"is_cacheable"`
+	Preconnect  bool                   `json:"preconnect"`
+	P2PSkill    int                    `json:"p2p_skill"`
+	AesKey      string                 `json:"aesKey"` // AES-128 key for KCP encryption
+}
+
+// P2PSession carries the WebRTC signaling identity returned by rtc.config.get.
+// Its UID may differ from the mobile-login UID and is authoritative for the
+// offer header.from and SDP cname on p2pType=4 cameras.
+type P2PSession struct {
+	UID       string `json:"uid"`
+	DevID     string `json:"devId"`
+	SessionID string `json:"sessionId"`
 }
 
 type ICEServer struct {

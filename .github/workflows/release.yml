@@ -1,0 +1,49 @@
+name: release
+
+# Cross-compiles the camera bridge for every OS/arch on a version tag and
+# publishes them as release assets (+ checksums.txt). The Home Assistant
+# integration downloads the matching asset on demand and verifies its SHA-256.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Cross-compile all targets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          VERSION="${GITHUB_REF_NAME}"
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          # Windows is intentionally excluded: the camera bridge uses Unix-only
+          # syscalls (golang.org/x/sys/unix) and only ever runs inside Home
+          # Assistant (Linux) or as a CLI on Linux/macOS.
+          targets="linux/amd64 linux/arm64 linux/arm darwin/amd64 darwin/arm64"
+          for t in $targets; do
+            os="${t%/*}"; arch="${t#*/}"
+            out="dist/tuya-ipc-terminal-${os}-${arch}"
+            [ "$os" = "windows" ] && out="${out}.exe"
+            export CGO_ENABLED=0 GOOS="$os" GOARCH="$arch"
+            if [ "$arch" = "arm" ]; then export GOARM=7; else unset GOARM || true; fi
+            echo "==> building $out"
+            go build -trimpath -ldflags "$LDFLAGS" -o "$out" .
+          done
+          ( cd dist && sha256sum * > checksums.txt && cat checksums.txt )
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

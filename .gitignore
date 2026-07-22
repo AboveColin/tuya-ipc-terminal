@@ -1,5 +1,16 @@
-tuya_session_*
-.tuya_*
-.tuya-*
-.tmp
-tuya-ipc-terminal
+# binaries
+/tuya-ipc-terminal
+/tuya-ipc-terminal-patched
+*.exe
+# go
+/bin/
+# junk
+.DS_Store
+__pycache__/
+*.log
+
+# runtime state (NEVER commit)
+.tuya-data/
+*session*.json
+user_*.json
+cameras.json

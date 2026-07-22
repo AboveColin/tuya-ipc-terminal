@@ -532,8 +532,14 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 	audioSdp := ""
 	videoSdp := ""
 
-	// Video media description based on skill
-	if skill != nil && len(skill.Videos) > 0 {
+	// The Philips PATH-A stream is live-verified as native HEVC (VPS/SPS/PPS +
+	// RFC 7798 FU payloads). Its persisted camera record predates the cloud video
+	// skill and otherwise falls through to the incorrect H.264 default.
+	if tuya.IsHardcodedDevice(camera.DeviceID) {
+		videoSdp += "m=video 0 RTP/AVP 96\r\n"
+		videoSdp += "a=rtpmap:96 H265/90000\r\n"
+		videoSdp += "a=fmtp:96 profile-id=1\r\n"
+	} else if skill != nil && len(skill.Videos) > 0 {
 		// HD (main) as default
 		streamType := tuya.GetStreamType(skill, "hd")
 		isHEVC := tuya.IsHEVC(skill, streamType)
@@ -569,8 +575,12 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 	videoSdp += fmt.Sprintf("a=control:%s/video\r\n", baseURL)
 	videoSdp += "a=recvonly\r\n"
 
-	// Audio media description based on skill
-	if skill != nil && len(skill.Audios) > 0 {
+	// PATH-A downstream camera audio is raw 16 kHz mono S16LE. The bridge
+	// converts it to network-order L16 before forwarding RTP.
+	if tuya.IsHardcodedDevice(camera.DeviceID) {
+		audioSdp += "m=audio 0 RTP/AVP 97\r\n"
+		audioSdp += "a=rtpmap:97 L16/16000/1\r\n"
+	} else if skill != nil && len(skill.Audios) > 0 {
 		audioInfo := skill.Audios[0] // Nehme ersten audio stream
 
 		switch audioInfo.CodecType {
@@ -594,9 +604,12 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 		audioSdp += "a=rtpmap:0 PCMU/8000\r\n"
 	}
 
-	backchannelAudio := audioSdp
-	backchannelAudio += fmt.Sprintf("a=control:%s/backchannel\r\n", baseURL)
-	backchannelAudio += "a=sendonly\r\n"
+	backchannelAudio := ""
+	if !tuya.IsHardcodedDevice(camera.DeviceID) {
+		backchannelAudio = audioSdp
+		backchannelAudio += fmt.Sprintf("a=control:%s/backchannel\r\n", baseURL)
+		backchannelAudio += "a=sendonly\r\n"
+	}
 
 	audioSdp += fmt.Sprintf("a=control:%s/audio\r\n", baseURL)
 	audioSdp += "a=recvonly\r\n"
