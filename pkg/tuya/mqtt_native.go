@@ -24,6 +24,7 @@ import (
 type NativeMQTTClient struct {
 	mqtt           mqtt.Client
 	uid            string
+	partnerID      string // Tuya partner prefix of the app that signed in
 	deviceId       string
 	localKey       []byte // Store as bytes for crypto
 	subscribeTopic string
@@ -73,9 +74,10 @@ func NewNativeMqttClientWithCreds(deviceID string, creds *MQTTCredentials) (*Nat
 	}
 
 	client := &NativeMQTTClient{
-		uid:      signalingUID,
-		deviceId: deviceID,
-		localKey: []byte(ActiveLocalKey()),
+		uid:       signalingUID,
+		partnerID: partnerFromUsername(creds.Username),
+		deviceId:  deviceID,
+		localKey:  []byte(ActiveLocalKey()),
 		// Use provided topics, or generate defaults
 		subscribeTopic: creds.SubscribeTopic,
 		publishTopic:   creds.PublishTopic,
@@ -211,7 +213,7 @@ func (c *NativeMQTTClient) onConnect(client mqtt.Client) {
 	}
 
 	// 3. Subscribe to partner-specific topic
-	partnerTopic := fmt.Sprintf("p2065237/mb/%s", c.uid)
+	partnerTopic := fmt.Sprintf("%s/mb/%s", c.partnerID, c.uid)
 	core.Logger.Info().Msgf("📡 Subscribing to Partner topic: %s (QoS=1)", partnerTopic)
 	if token := client.Subscribe(partnerTopic, 1, c.consume); token.Wait() && token.Error() != nil {
 		core.Logger.Error().Err(token.Error()).Msgf("❌ Failed to subscribe to Partner topic: %s", partnerTopic)
@@ -220,7 +222,7 @@ func (c *NativeMQTTClient) onConnect(client mqtt.Client) {
 	}
 
 	// Also subscribe to the partner topic with /in/ path (some cameras use this)
-	partnerInTopic := fmt.Sprintf("p2065237/mb/in/%s", c.uid)
+	partnerInTopic := fmt.Sprintf("%s/mb/in/%s", c.partnerID, c.uid)
 	core.Logger.Info().Msgf("📡 Subscribing to Partner IN topic: %s (QoS=1)", partnerInTopic)
 	if token := client.Subscribe(partnerInTopic, 1, c.consume); token.Wait() && token.Error() != nil {
 		core.Logger.Error().Err(token.Error()).Msgf("❌ Failed to subscribe to Partner IN topic: %s", partnerInTopic)
@@ -883,4 +885,20 @@ func (c *NativeMQTTClient) sendEncryptedMessage(protocol int, data interface{}) 
 	core.Logger.Info().Msgf("✅ Message published successfully to %s", c.publishTopic)
 	core.Logger.Info().Msgf("═══════════════════════════════════════════════════════════")
 	return nil
+}
+
+// defaultPartnerID is the Philips Pet Series app's Tuya partner prefix, used
+// when the username does not carry one.
+const defaultPartnerID = "p2065237"
+
+// partnerFromUsername returns the Tuya partner prefix that a mobile MQTT
+// username starts with ("<partner>_v1_<appId>_..."). Each Philips app has its
+// own: Pet Series p2065237, HomeID p2645382. The partner topics must use the
+// prefix of the app that signed in.
+func partnerFromUsername(username string) string {
+	partner, _, found := strings.Cut(username, "_v1_")
+	if !found || partner == "" || strings.Contains(partner, "_") {
+		return defaultPartnerID
+	}
+	return partner
 }
