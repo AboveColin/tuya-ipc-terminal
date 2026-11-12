@@ -36,12 +36,27 @@ _LOGGER = logging.getLogger("pet_creds_sidecar")
 TOKEN_FILE = os.environ.get("PETSERIES_TOKEN_FILE", "/data/philips_tokens.json")
 
 
+async def _find_device(client: PetsSeriesClient, device_id: str) -> None:
+    """Read the device lists, so the client knows which app holds the device.
+
+    A feeder in the Pet Series app and a feeder in the HomeID app live in
+    different Tuya spaces. Without the device lists the client uses the Pet
+    Series session for every device, and a HomeID camera fails.
+    """
+    for home in await client.get_homes():
+        for device in await client.get_devices(home):
+            if device_id in (device.id, str(device.vendor_id or "")):
+                return
+    raise RuntimeError("the Philips account does not list this device")
+
+
 async def _fetch(device_id: str) -> dict:
     """Return fresh WebRTC config, local key, and MQTT session config."""
     client = PetsSeriesClient(token_file=TOKEN_FILE)
     try:
         await client.initialize()           # refreshes + persists rotated tokens
         await client.ensure_token_valid()   # guarantee a live id_token for login
+        await _find_device(client, device_id)
         webrtc = await client.get_cloud_webrtc_config(device_id)
         if not webrtc:
             raise RuntimeError("empty WebRTC config (device offline or auth?)")
@@ -49,7 +64,10 @@ async def _fetch(device_id: str) -> dict:
         local_key = definition.get("localKey")
         if local_key:
             webrtc["localKey"] = local_key
-        mobile = client._tuya_mobile
+        # The session of the app that holds the device, the same one that
+        # answered the two calls above.
+        session = await client.tuya_session(device_id)
+        mobile = session.client
         if mobile is None or not mobile.uid or not mobile.ecode:
             raise RuntimeError("Tuya mobile login returned no MQTT session fields")
         mqtt = mqtt_credentials(
@@ -57,7 +75,9 @@ async def _fetch(device_id: str) -> dict:
                 uid=mobile.uid,
                 sid=mobile.sid,
                 ecode=mobile.ecode,
-                partner_id=os.environ.get("PETSERIES_TUYA_PARTNER_ID", "p2065237"),
+                partner_id=os.environ.get("PETSERIES_TUYA_PARTNER_ID")
+                or session.partner_id
+                or session.backend.partner_id,
             )
         # Protocol 302 signaling is device-addressed.  The shared helper's
         # control-channel topics are account-addressed and use the opposite
@@ -67,7 +87,7 @@ async def _fetch(device_id: str) -> dict:
         webrtc["mqtt"] = {
             **mqtt,
             "broker": os.environ.get("PETSERIES_TUYA_MQTT_BROKER", "ssl://m1.tuyaeu.com:8883"),
-            "client_id": mqtt_client_id("com.versuni.nbx.petsseries"),
+            "client_id": mqtt_client_id(session.backend.package),
             "uid": mobile.uid,
         }
         return webrtc
